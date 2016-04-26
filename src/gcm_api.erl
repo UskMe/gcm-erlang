@@ -1,5 +1,5 @@
 -module(gcm_api).
--export([push/3]).
+-export([push/3,push/2]).
 
 -define(BASEURL, "https://android.googleapis.com/gcm/send").
 
@@ -12,10 +12,13 @@
 -spec push(regids(),message(),string()) -> {'error',any()} | {'noreply','unknown'} | {'ok',result()}.
 push(RegIds, Message, Key) ->
     Request = jsx:encode([{<<"registration_ids">>, RegIds}|Message]),
+    push(Request,Key)
+.
 
+-spec push(Request::binary(),Key::string()) -> {'error',any()} | {'noreply','unknown'} | {'ok',result()}.
+push(Request, Key) ->
     io:format("Request ~p",[Request]),
     ApiKey = string:concat("key=", Key),
-
     try httpc:request(post, {?BASEURL, [{"Authorization", ApiKey}], "application/json", Request}, [], []) of
         {ok, {{_, 200, _}, _Headers, Body}} ->
             Json = jsx:decode(response_to_binary(Body)),
@@ -44,7 +47,8 @@ push(RegIds, Message, Key) ->
         Exception ->
             error_logger:error_msg("Error in request. Exception ~p while calling URL: ~p~n", [Exception, ?BASEURL]),
             {error, Exception}
-    end.
+    end
+.
 
 -spec response_to_binary(binary() | list()) -> binary().
 response_to_binary(Json) when is_binary(Json) ->

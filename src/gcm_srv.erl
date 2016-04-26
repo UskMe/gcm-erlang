@@ -6,7 +6,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--export([push/3, push/4, sync_push/3, sync_push/4]).
+-export([push/3, push/4, sync_push/3, sync_push/4 , push_json/2, push_json/3]).
 
 -define(SERVER, ?MODULE).
 -define(RETRY, 3).
@@ -31,6 +31,14 @@ push(Name, RegIds, Message) ->
 
 push(Name, RegIds, Message, Retry) ->
     poolboy:transaction(Name, fun(Worker) ->  gen_server:cast(Worker, {send, RegIds, Message, Retry}) end)
+.
+
+push_json(Name, Message) ->
+  push_json(Name, Message, ?RETRY)
+.
+
+push_json(Name, Message, Retry) ->
+  poolboy:transaction(Name, fun(Worker) ->  gen_server:cast(Worker, {send, Message, Retry}) end)
 .
 
 sync_push(Name, RegIds, Message) ->
@@ -58,12 +66,19 @@ handle_call({send, RegIds, Message, Retry}, _From, #state{key=Key} = State) ->
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
+handle_cast({send, Message, Retry}, #state{key=Key} = State) ->
+    io:format("handle cast"),
+    do_push_json(Message, Key, Retry),
+    {noreply, State}
+;
 handle_cast({send, RegIds, Message, Retry}, #state{key=Key} = State) ->
-    do_push(RegIds, Message, Key, Retry),
+  io:format("handle cast oooold"),
+  do_push(RegIds, Message, Key, Retry),
     {noreply, State};
 
 handle_cast(_Msg, State) ->
-    {noreply, State}.
+    {noreply, State}
+.
 
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -90,9 +105,40 @@ do_push(RegIds, Message, Key, Retry) ->
             {error, Reason}
     end.
 
+%% Internal
+do_push_json(_, _, 0) ->
+  ok;
+
+do_push_json(Message, Key, Retry) ->
+  error_logger:info_msg("Sending message: ~p retries: ~p.~n", [Message, Retry]),
+  case gcm_api:push(Message, Key) of
+    {ok, GCMResult} ->
+      handle_result_json(GCMResult);
+    {error, {retry, RetryAfter}} ->
+      do_backoff_json(RetryAfter, Message, Retry),
+      {error, retry};
+    {error, Reason} ->
+      {error, Reason}
+  end.
+
+handle_result_json(GCMResult) ->
+  {_MulticastId, _SuccessesNumber, _FailuresNumber, _CanonicalIdsNumber, Results} = GCMResult %,
+  %lists:map(fun({Result, RegId}) -> {RegId, parse(Result)} end, Results)
+.
+
 handle_result(GCMResult, RegIds) ->
     {_MulticastId, _SuccessesNumber, _FailuresNumber, _CanonicalIdsNumber, Results} = GCMResult,
-    lists:map(fun({Result, RegId}) -> {RegId, parse(Result)} end, lists:zip(Results, RegIds)).
+    lists:map(fun({Result, RegId}) -> {RegId, parse(Result)} end, lists:zip(Results, RegIds))
+.
+
+do_backoff_json(RetryAfter, Message, Retry) ->
+  case RetryAfter of
+    no_retry ->
+      ok;
+    _ ->
+      error_logger:info_msg("Received retry-after. Will retry: ~p times~n", [Retry-1]),
+      timer:apply_after(RetryAfter * 1000, ?MODULE, push_json, [self(), Message, Retry - 1])
+  end.
 
 do_backoff(RetryAfter, RegIds, Message, Retry) ->
     case RetryAfter of
