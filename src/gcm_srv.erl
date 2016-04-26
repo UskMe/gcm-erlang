@@ -1,7 +1,7 @@
--module(gcm).
+-module(gcm_srv).
 -behaviour(gen_server).
 
--export([start/2, stop/1, start_link/2]).
+-export([start/2, start/4, stop/1, start_link/1]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
@@ -14,26 +14,36 @@
 -record(state, {key}).
 
 start(Name, Key) ->
-    gcm_sup:start_child(Name, Key).
+    start(Name, Key, 1, 0)
+.
+
+start(Name, Key, Size, Overflow) ->
+    gcm_pool_sup:create_pool(Name,Key,Size,Overflow)
+.
 
 stop(Name) ->
-    gen_server:call(Name, stop).
+    gcm_pool_sup:delete_pool(Name)
+.
 
 push(Name, RegIds, Message) ->
-    push(Name, RegIds, Message, ?RETRY).
+    push(Name, RegIds, Message, ?RETRY)
+.
 
 push(Name, RegIds, Message, Retry) ->
-    gen_server:cast(Name, {send, RegIds, Message, Retry}).
+    poolboy:transaction(Name, fun(Worker) ->  gen_server:cast(Worker, {send, RegIds, Message, Retry}) end)
+.
 
 sync_push(Name, RegIds, Message) ->
-    sync_push(Name, RegIds, Message, ?RETRY).
+    sync_push(Name, RegIds, Message, ?RETRY)
+.
 
 sync_push(Name, RegIds, Message, Retry) ->
-    gen_server:call(Name, {send, RegIds, Message, Retry}).
+    poolboy:transaction(Name, fun(Worker) ->  gen_server:cast(Worker, {send, RegIds, Message, Retry}) end)
+.
 
 %% OTP
-start_link(Name, Key) ->
-    gen_server:start_link({local, Name}, ?MODULE, [Key], []).
+start_link(Key) ->
+    gen_server:start_link(?MODULE, [Key], []).
 
 init([Key]) ->
     {ok, #state{key=Key}}.

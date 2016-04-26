@@ -7,13 +7,13 @@
 
 start() ->
     error_logger:tty(false),
-    {ok, _} = gcm:start_link(test, "APIKEY"),
+    {ok, _} = gcm_srv:start_link(test, "APIKEY"),
     meck:new(gcm_api),
     _Pid = self().
 
 stop(_Pid) ->
     meck:unload(gcm_api),
-    gcm:stop(test).
+    gcm_srv:stop(test).
 
 gcm_sync_test_() ->
     [{"sync_push returns the result", ?setup(fun receive_results_from_sync_push/1)}].
@@ -24,7 +24,7 @@ receive_results_from_sync_push(_) ->
 
     mock_gcm_api(),
 
-    Actual = gcm:sync_push(test, RegIds, Message),
+    Actual = gcm_srv:sync_push(test, RegIds, Message),
 
     Expected = [{<<"RegId0">>, ok}, {<<"RegId1">>, <<"InvalidRegistration">>},
                 {<<"RegId2">>, {<<"NewRegistrationId">>, <<"NewRegId">>}}],
